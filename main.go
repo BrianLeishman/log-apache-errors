@@ -3,7 +3,6 @@ package main
 import (
 	"database/sql"
 	"flag"
-	"fmt"
 	"html"
 	"io/ioutil"
 	"log"
@@ -14,12 +13,17 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/marcsauter/single"
+	"golang.org/x/crypto/sha3"
 )
 
 type logEntry struct {
 	message string
 	added   string
 	ip      string
+}
+
+type ignoredApacheError struct {
+	hash string
 }
 
 var db *sql.DB
@@ -91,19 +95,21 @@ func main() {
 		"and`users`.`Deleted`=0;")
 	handleErr(err)
 
+	selectIgnoredApacheErrorsQuery, err := db.Prepare("select`_Message+SHA3-224`from`ignoredapacheerrors`where`__Active`=1;")
+	handleErr(err)
+
 	hostname, err = os.Hostname()
 	handleErr(err)
 
-	for {
-		b, err := ioutil.ReadFile(*filePtr)
-		handleErr(err)
+	//for {
+	b, err := ioutil.ReadFile(*filePtr)
+	handleErr(err)
 
-		err = os.Truncate(*filePtr, 0)
-		handleErr(err)
+	//err = os.Truncate(*filePtr, 0)
+	//handleErr(err)
 
-		s := string(b)
-
-		matches := r.FindAllStringSubmatch(s, -1)
+	matches := r.FindAllStringSubmatch(string(b), -1)
+	if len(matches) > 0 {
 		logEntries := []logEntry{}
 		currentLogEntry := -1
 
@@ -118,20 +124,43 @@ func main() {
 
 			if (message[0] != ' ' && message[0:12] != "Stack trace:") || currentLogEntry == -1 {
 				currentLogEntry++
-				logEntries = append(logEntries, logEntry{message: message, added: t.Format("2006-01-02 15:04:05.000000"), ip: m[4]})
+				logEntries = append(logEntries, logEntry{message: m[5] + " " + message, added: t.Format("2006-01-02 15:04:05.000000"), ip: m[4]})
 			} else {
 				logEntries[currentLogEntry].message += "\n" + message
 			}
 		}
 
-		for _, l := range logEntries {
+		if len(logEntries) > 0 {
+			ignoredApacheErrorsData, err := selectIgnoredApacheErrorsQuery.Query()
+			handleErr(err)
 
-			fmt.Println(l.message, l.added, l.ip, "\n")
-			logError(l.message, *filePtr, l.added, &l.ip)
+			hashes := make(map[string]struct{})
 
+			for ignoredApacheErrorsData.Next() {
+				i := ignoredApacheError{}
+				err = ignoredApacheErrorsData.Scan(&i.hash)
+				handleErr(err)
+
+				hashes[i.hash] = struct{}{}
+			}
+
+			hasHashes := len(hashes) > 0
+			for _, l := range logEntries {
+				hash := sha3.Sum224([]byte(l.message))
+				//fmt.Println(l.message, l.added, l.ip, "\n")
+				//fmt.Printf("%x\n", hash)
+				if hasHashes {
+					if _, ok := hashes[string(hash[:])]; ok {
+						//fmt.Println("skipped")
+						continue
+					}
+				}
+				logError(l.message, *filePtr, l.added, &l.ip)
+			}
 		}
-
-		time.Sleep(20 * time.Millisecond)
 	}
+
+	//	time.Sleep(100 * time.Millisecond)
+	//}
 
 }
