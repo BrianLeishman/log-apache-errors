@@ -101,66 +101,66 @@ func main() {
 	hostname, err = os.Hostname()
 	handleErr(err)
 
-	//for {
-	b, err := ioutil.ReadFile(*filePtr)
-	handleErr(err)
+	for {
+		b, err := ioutil.ReadFile(*filePtr)
+		handleErr(err)
 
-	//err = os.Truncate(*filePtr, 0)
-	//handleErr(err)
+		err = os.Truncate(*filePtr, 0)
+		handleErr(err)
 
-	matches := r.FindAllStringSubmatch(string(b), -1)
-	if len(matches) > 0 {
-		logEntries := []logEntry{}
-		currentLogEntry := -1
+		matches := r.FindAllStringSubmatch(string(b), -1)
+		if len(matches) > 0 {
+			logEntries := []logEntry{}
+			currentLogEntry := -1
 
-		for _, m := range matches {
-			message := m[6]
-			if len(message) == 0 {
-				continue
-			}
+			for _, m := range matches {
+				message := m[6]
+				if len(message) == 0 {
+					continue
+				}
 
-			t, err := time.Parse("Mon Jan _2 15:04:05.000000 2006", m[1])
-			handleErr(err)
-
-			if (message[0] != ' ' && message[0:12] != "Stack trace:") || currentLogEntry == -1 {
-				currentLogEntry++
-				logEntries = append(logEntries, logEntry{message: m[5] + " " + message, added: t.Format("2006-01-02 15:04:05.000000"), ip: m[4]})
-			} else {
-				logEntries[currentLogEntry].message += "\n" + message
-			}
-		}
-
-		if len(logEntries) > 0 {
-			ignoredApacheErrorsData, err := selectIgnoredApacheErrorsQuery.Query()
-			handleErr(err)
-
-			hashes := make(map[string]struct{})
-
-			for ignoredApacheErrorsData.Next() {
-				i := ignoredApacheError{}
-				err = ignoredApacheErrorsData.Scan(&i.hash)
+				t, err := time.Parse("Mon Jan _2 15:04:05.000000 2006", m[1])
 				handleErr(err)
 
-				hashes[i.hash] = struct{}{}
+				if (message[0] != ' ' && message[0:12] != "Stack trace:") || currentLogEntry == -1 {
+					currentLogEntry++
+					logEntries = append(logEntries, logEntry{message: m[5] + " " + message, added: t.Format("2006-01-02 15:04:05.000000"), ip: m[4]})
+				} else {
+					logEntries[currentLogEntry].message += "\n" + message
+				}
 			}
 
-			hasHashes := len(hashes) > 0
-			for _, l := range logEntries {
-				hash := sha3.Sum224([]byte(l.message))
-				//fmt.Println(l.message, l.added, l.ip, "\n")
-				//fmt.Printf("%x\n", hash)
-				if hasHashes {
-					if _, ok := hashes[string(hash[:])]; ok {
-						//fmt.Println("skipped")
-						continue
-					}
+			if len(logEntries) > 0 {
+				ignoredApacheErrorsData, err := selectIgnoredApacheErrorsQuery.Query()
+				handleErr(err)
+
+				hashes := make(map[string]struct{})
+
+				for ignoredApacheErrorsData.Next() {
+					i := ignoredApacheError{}
+					err = ignoredApacheErrorsData.Scan(&i.hash)
+					handleErr(err)
+
+					hashes[i.hash] = struct{}{}
 				}
-				logError(l.message, *filePtr, l.added, &l.ip)
+
+				hasHashes := len(hashes) > 0
+				for _, l := range logEntries {
+					hash := sha3.Sum224([]byte(l.message))
+					//fmt.Println(l.message, l.added, l.ip, "\n")
+					//fmt.Printf("%x\n", hash)
+					if hasHashes {
+						if _, ok := hashes[string(hash[:])]; ok {
+							//fmt.Println("skipped")
+							continue
+						}
+					}
+					logError(l.message, *filePtr, l.added, &l.ip)
+				}
 			}
 		}
-	}
 
-	//	time.Sleep(100 * time.Millisecond)
-	//}
+		time.Sleep(100 * time.Millisecond)
+	}
 
 }
